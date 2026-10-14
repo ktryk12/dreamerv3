@@ -1,0 +1,54 @@
+# CPU-first DreamerV3 image for Podman.
+#
+# The upstream Dockerfile builds on the NVIDIA driver image and installs DMLab,
+# MineRL, Atari, ProcGen and dm_control. That is heavy and GPU-bound. This
+# Containerfile stays deliberately small: CPU JAX plus Crafter, which is enough
+# to smoke test the agent and to iterate on our own environments. The upstream
+# Dockerfile is kept untouched for GPU runs.
+#
+#   podman build -f Containerfile.podman -t dreamerv3-cpu .
+#   podman run --rm -v dreamerv3-logs:/logdir dreamerv3-cpu \
+#     python dreamerv3/main.py --logdir /logdir/run --configs crafter debug
+
+FROM docker.io/library/python:3.11-slim
+
+# System libraries. ffmpeg for video logging, libgl1/libglib2.0 for the
+# OpenCV wheel that Crafter pulls in, git for pip installs from source.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg git libgl1 libglib2.0-0 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_ROOT_USER_ACTION=ignore
+
+RUN pip install -U pip setuptools
+
+# Upstream requirements.txt stays the source of truth so we keep inheriting
+# dependency bumps from danijar/dreamerv3. Four lines are handled separately:
+#
+#   jax[cuda12], nvidia-cuda-nvcc  no CPU equivalent, dropped
+#   chex, optax                    unpinned upstream, and their current
+#                                  releases require jax >= 0.7; that jax
+#                                  rejects the positional jax.jit arguments in
+#                                  embodied/jax/transform.py
+#
+# So the rest of the requirements install first, then the JAX stack is pinned
+# to the 0.4.33 line that requirements.txt itself asks for.
+COPY requirements.txt requirements.txt
+RUN grep -v -E "^(jax\[cuda|nvidia-cuda-nvcc|chex|optax)" requirements.txt \
+      > requirements.cpu.txt \
+    && pip install -r requirements.cpu.txt \
+    && pip install "jax[cpu]==0.4.33" "chex==0.1.87" "optax==0.2.3"
+
+# Crafter is our lightweight CPU benchmark environment.
+RUN pip install crafter
+
+WORKDIR /app
+COPY . .
+
+# No xvfb and no nvidia-smi here, unlike upstream's entrypoint.sh: Crafter
+# renders offscreen with no X server, so commands run directly.
+ENV JAX_PLATFORMS=cpu
+CMD ["python", "-c", "import dreamerv3; print('dreamerv3 image ready')"]
