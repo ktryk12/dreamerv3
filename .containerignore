@@ -1,0 +1,9 @@
+.git
+.github
+*.py[cod]
+__pycache__/
+dist
+build
+*.egg-info
+logdir
+scores
