@@ -43,14 +43,36 @@ Revisit this when upstream updates its JAX pins.
 ## Requirements
 
 - Podman 5.x on Windows with a running machine (`podman machine start`)
-- The WSL machine needs more than the default 2 GiB of memory for training
-  runs. 8 GiB is a reasonable starting point:
 
-  ```powershell
-  podman machine stop
-  podman machine set --memory 8192 --cpus 8
-  podman machine start
-  ```
+### Machine capacity on the WSL provider
+
+`podman machine ls` and `podman machine inspect` report the machine's
+configured memory and disk size, but on the **WSL provider those fields are not
+enforced**. Do not trust them, and do not run `podman machine set --memory` to
+"fix" them. The real limits are:
+
+- **Memory** comes from the global `%USERPROFILE%\.wslconfig`, which applies to
+  every WSL2 distribution on the host. Changing it requires `wsl --shutdown`,
+  so do not touch it while other WSL systems are running.
+- **Disk** comes from the machine's auto-growing `ext4.vhdx`. Its growth is
+  bounded by free space on the drive holding the file, not by the reported
+  disk size.
+
+Check what is actually available:
+
+```powershell
+podman machine ssh free -h                  # real memory in the VM
+podman machine ssh df -hT /                 # real image storage
+
+# where the virtual disk lives
+Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss\*' |
+  Where-Object { $_.DistributionName -like '*podman*' } |
+  Select-Object DistributionName, BasePath
+```
+
+On this workstation (2026-10-14) that gives 472 GiB of memory and 920 GiB free
+in the image store, against the 2 GiB / 100 GiB that `podman machine` reports.
+No capacity change is needed for CPU training.
 
 ## Usage
 
