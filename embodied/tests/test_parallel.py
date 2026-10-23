@@ -24,7 +24,11 @@ import utils
         'decision; redesigning the test to run combined() in a subprocess and '
         'kill it would invent a contract rather than restore one. The imports '
         'and call signatures in this module were brought up to date so the '
-        'module collects and the remaining gap is exactly the one named here.')
+        'module collects and the remaining gap is exactly the one named here. '
+        'The coverage it was meant to provide now lives in '
+        'test_parallel_lifecycle.py, which runs combined() in a killable '
+        'portal.Process, waits for reported progress within a wall-clock '
+        'budget, then kills it and verifies process cleanup.')
 )
 class TestParallel:
 

@@ -99,9 +99,15 @@ class TestAgent:
 
   def stream(self, st):
     # base.Agent.dataset(generator) became stream(st) -> st in f8817c40. The
-    # JAX agent wraps the stream for device placement and seeding; a test agent
-    # needs neither, so it passes the stream through unchanged.
-    return st
+    # JAX agent returns streams.Prefetch(st, fn), where fn does device
+    # placement and seeding. A test agent needs neither, but it does need the
+    # Prefetch: embodied/run/parallel.py gates reporting on
+    # should_report(skip=not received['report']), and received[source] is only
+    # incremented inside parallel_stream(), which the Prefetch worker thread
+    # is what advances. Returning st unchanged leaves the report stream
+    # unprimed, so reports never run.
+    import embodied
+    return embodied.streams.Prefetch(st)
 
   def save(self):
     self._stats['saves'] += 1
