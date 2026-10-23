@@ -39,6 +39,23 @@ class Uniform:
 
   def __call__(self):
     with self.lock:
+      if not self.keys:
+        # Replay._insert evicts before it inserts, so with capacity=1 the
+        # selector is empty from the eviction until the new item's stepids
+        # have been read. Replay.add holds only a read lock and Replay.sample
+        # takes none, so a sampler thread can land in that window. numpy
+        # would raise ValueError('high <= 0') here, which Replay._sample does
+        # not catch; KeyError is the signal its retry loop already
+        # understands, so the window becomes a retry instead of a crash.
+        #
+        # This is not a substitute for waiting on an empty buffer:
+        # Replay.sample still blocks on len(self.sampler) before it samples,
+        # so a buffer that stays empty waits there rather than spinning here.
+        #
+        # The draw below is untouched, and the generator is not advanced on
+        # the empty path, so the sampling distribution and the exact sequence
+        # of sampled keys are unchanged.
+        raise KeyError('no items to sample from')
       index = self.rng.integers(0, len(self.keys)).item()
       return self.keys[index]
 

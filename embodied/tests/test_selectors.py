@@ -1,3 +1,5 @@
+import collections
+
 import numpy as np
 import pytest
 from embodied.core import selectors
@@ -106,20 +108,36 @@ class TestUniform:
       assert sel() == step
       invariants(sel)
 
-  def test_call_on_empty_selector(self):
-    # Documents a known, narrow limitation rather than asserting it is fine.
-    #
-    # Uniform.__call__ draws rng.integers(0, len(self.keys)), which numpy
-    # rejects when the selector is empty. Replay._insert evicts before it
-    # inserts, so a capacity=1 buffer is briefly empty, and Replay.add holds
-    # only a read lock while Replay.sample takes no lock at all. A sampler
-    # thread that calls into the selector inside that window therefore sees
-    # ValueError, which Replay._sample does not catch (it retries KeyError).
-    #
-    # Making __call__ raise KeyError instead would route it into that existing
-    # retry path, but __call__ is outside this change's authorization. If this
-    # test starts failing, that fix has landed and the comment above should be
-    # updated.
+  def test_call_on_empty_selector_raises_keyerror(self):
+    # KeyError, not numpy's ValueError: it is the signal Replay._sample's
+    # retry loop understands, which turns the capacity=1 eviction window into
+    # a retry instead of a crash.
     sel = selectors.Uniform(seed=0)
-    with pytest.raises(ValueError):
+    with pytest.raises(KeyError):
       sel()
+
+  def test_empty_call_does_not_advance_the_generator(self):
+    # The fix must not change which keys get sampled. The empty path returns
+    # before the draw, so a selector that was called while empty produces the
+    # same sequence as one that never was.
+    def sequence(empty_calls):
+      sel = selectors.Uniform(seed=7)
+      for _ in range(empty_calls):
+        with pytest.raises(KeyError):
+          sel()
+      for key in range(10):
+        sel[key] = STEPIDS
+      return [sel() for _ in range(50)]
+
+    assert sequence(0) == sequence(5) == sequence(50)
+
+  def test_distribution_is_unchanged(self):
+    # Same seed, same keys, same draws as before the fix: uniform over the
+    # live keys, with every key reachable.
+    sel = selectors.Uniform(seed=0)
+    for key in range(4):
+      sel[key] = STEPIDS
+    counts = collections.Counter(sel() for _ in range(4000))
+    assert set(counts) == {0, 1, 2, 3}
+    for key, count in counts.items():
+      assert 800 < count < 1200, counts
