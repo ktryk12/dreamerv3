@@ -131,6 +131,121 @@ class TestSamplerEnteringTheWindow:
     assert set(sampled) <= {0, 1}, sampled
 
 
+class TestRetryIsBounded:
+  """The retry must terminate, and it must actually be a retry.
+
+  Replay._sample's loop has no sleep, so if the selector could stay empty the
+  retry would spin without end. It cannot: the window closes when _insert
+  registers the new item, and Replay.sample waits on len(self.sampler) before
+  it ever gets there. These tests pin both halves - that the retry happens,
+  and that it ends.
+  """
+
+  def test_sample_returns_and_the_retry_is_counted(self):
+    replay = embodied.replay.Replay(length=1, capacity=1)
+    replay.add({'step': 0})
+
+    # Count the KeyErrors the selector raises, so "it retried" is measured
+    # rather than assumed.
+    selector = replay.sampler
+    original_call = selector.__call__
+    retries = [0]
+
+    class Counting:
+      def __init__(self, inner):
+        self.inner = inner
+      def __call__(self):
+        try:
+          return self.inner()
+        except KeyError:
+          retries[0] += 1
+          raise
+      def __getattr__(self, name):
+        return getattr(self.inner, name)
+      def __setitem__(self, key, value):
+        self.inner[key] = value
+      def __delitem__(self, key):
+        del self.inner[key]
+      def __len__(self):
+        return len(self.inner)
+
+    replay.sampler = Counting(selector)
+
+    original_getseq = replay._getseq
+    opened = threading.Event()
+    sampled = []
+    errors = []
+
+    def slow_getseq(*args, **kwargs):
+      # Hold the window open, but only once, and only for a moment.
+      if not opened.is_set():
+        opened.set()
+        time.sleep(0.3)
+      return original_getseq(*args, **kwargs)
+
+    def sampler():
+      # _sample bypasses the limiter, which is the interleaving the fix
+      # covers: a caller that already passed the length check.
+      try:
+        opened.wait(5.0)
+        started = time.time()
+        seq, _ = replay._sample('train')
+        sampled.append(time.time() - started)
+      except BaseException as error:  # noqa: BLE001 - recorded, then asserted
+        errors.append(error)
+
+    thread = threading.Thread(target=sampler)
+    thread.start()
+    replay._getseq = slow_getseq
+    inserter = threading.Thread(target=lambda: replay.add({'step': 1}))
+    inserter.start()
+
+    inserter.join(timeout=30)
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), 'the retry did not terminate'
+    assert not errors, f'{type(errors[0]).__name__}: {errors[0]}'
+    assert len(sampled) == 1
+    # It finished, and well inside the join timeout.
+    assert sampled[0] < 10.0, sampled
+    # And it really did go round the retry at least once.
+    assert retries[0] >= 1, retries
+
+  def test_many_evictions_do_not_wedge_a_sampler(self):
+    """A long churn must not leave a sampler stuck or starved."""
+    replay = embodied.replay.Replay(length=1, capacity=1)
+    replay.add({'step': -1})
+    done = threading.Event()
+    counts = [0]
+    errors = []
+
+    def sampler():
+      try:
+        while not done.is_set():
+          replay.sample(1)
+          counts[0] += 1
+      except BaseException as error:  # noqa: BLE001
+        errors.append(error)
+
+    thread = threading.Thread(target=sampler)
+    thread.start()
+    started = time.time()
+    try:
+      for step in range(3000):
+        replay.add({'step': step})
+    finally:
+      done.set()
+      thread.join(timeout=30)
+    elapsed = time.time() - started
+
+    assert not thread.is_alive(), 'sampler thread did not finish'
+    assert not errors, f'{type(errors[0]).__name__}: {errors[0]}'
+    assert counts[0] > 0, 'sampler never completed a sample'
+    # 3000 inserts at capacity=1 with a sampler alongside: seconds, not
+    # minutes. A wedged or unboundedly spinning retry would blow this.
+    assert elapsed < 60.0, elapsed
+
+
 @pytest.mark.parametrize('capacity', [1, 2, 10])
 class TestConcurrentSampling:
 
