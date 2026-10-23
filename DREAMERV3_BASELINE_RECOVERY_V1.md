@@ -148,8 +148,18 @@ existing `unbatched()` wrapper and every `assert` are untouched. This took
 ### 3.3 Agent: `dataset()` → `stream()`
 
 `base.Agent.dataset(generator)` became `stream(st) -> st`. `TestAgent` now
-implements `stream`, passing the stream through — the JAX agent wraps it for
-device placement and seeding, which a test agent needs neither of.
+implements `stream`.
+
+> **Corrected on 2026-10-23.** This section originally said `TestAgent.stream`
+> passes the stream through because a test agent needs neither the device
+> placement nor the seeding the JAX agent adds. That was wrong in one respect:
+> the JAX agent returns `streams.Prefetch(st, fn)`, and the parallel learner
+> gates reporting on `should_report(skip=not received['report'])` while
+> `received[source]` is only incremented inside `parallel_stream()`, which the
+> Prefetch worker thread is what advances. Without the Prefetch the report
+> stream is never primed and `reports` stays at zero forever.
+> `TestAgent.stream` now returns `embodied.streams.Prefetch(st)`. See
+> `DREAMERV3_BASELINE_CLOSEOUT_V1.md`.
 
 A shared `make_stream(args, replay, mode)` was added to
 `embodied/tests/utils.py`, mirroring `dreamerv3/main.py:make_stream` (Stateless

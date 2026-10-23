@@ -50,6 +50,40 @@ for every future checkout and clone.
 
 ---
 
+## 1b. Measured: the image is not reproducible
+
+Added after a clean rebuild on 2026-10-23. `podman build --no-cache
+--pull=always` took 381 s and produced a working image (`dreamerv3-cpu-clean`,
+smoke exit 0, no warnings), but **not the same image**. Comparing
+`pip freeze` between the cached build and the clean one, nine days apart:
+
+```text
+cached: 100 packages        clean: 101 packages
+
+certifi           2026.7.22    -> 2026.10.19
+fastapi           0.143.1      -> 0.161.1
+filelock          4.1.2        -> 4.2.4
+google-api-core   2.42.0       -> 2.43.0
+google-cloud-...  3.17.0       -> 3.17.1
+googleapis-...    1.75.5       -> 1.76.0
+granular          0.24.1       -> 0.24.2
+pillow            12.3.0       -> 13.0.0      <- major
+pycparser         3.11         -> 3.12
+python-dateutil   2.9.0.post0  -> 3.0.0       <- major
+starlette         1.8.0        -> 1.9.0
+wcwidth           0.9.2        -> 0.9.3
+websockets        17.2         -> 17.3
+tzdata            (absent)     -> 2026.5      <- new
+```
+
+Fourteen version changes and one new package in nine days, two of them major
+version bumps, in an image whose only declared pins are in upstream's
+`requirements.txt`. The build happened to still work; that is the measurement,
+not a guarantee. This is the concrete argument for sections 2 and 3 below:
+without a digest on the base image and a pin on `crafter`, "rebuild the image"
+and "rebuild the same image" are different operations, and a training result
+cannot be attributed to a specific software state.
+
 ## 2. Base image is pinned by tag, not digest (recommended)
 
 `Containerfile.podman` begins `FROM docker.io/library/python:3.11-slim`. The
