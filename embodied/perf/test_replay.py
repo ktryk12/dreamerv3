@@ -24,6 +24,12 @@ STEP = {
     'is_terminal': np.array(False),
 }
 
+def samples(replay, batch=1, mode='train'):
+  # Replay.dataset() was replaced by Replay.sample() in f8817c40, which returns
+  # one batch per call instead of an iterator.
+  while True:
+    yield replay.sample(batch, mode)
+
 
 class TestReplay:
 
@@ -39,7 +45,7 @@ class TestReplay:
     duration = time.time() - start
     print(name, 'inserts/sec:', int(inserts / duration))
     start = time.time()
-    dataset = iter(replay.dataset(1))
+    dataset = samples(replay)
     for _ in range(int(samples)):
       next(dataset)
     duration = time.time() - start
@@ -58,7 +64,7 @@ class TestReplay:
     duration = time.time() - start
     print('chunksize', chunksize, 'inserts/sec:', int(inserts / duration))
     start = time.time()
-    dataset = iter(replay.dataset(1))
+    dataset = samples(replay)
     for _ in range(int(samples)):
       next(dataset)
     duration = time.time() - start
@@ -100,7 +106,7 @@ class TestReplay:
     def sampler():
       try:
         ident = threading.get_ident()
-        dataset = iter(replay.dataset(1))
+        dataset = samples(replay)
         while running:
           next(dataset)
           samples[ident] += 1

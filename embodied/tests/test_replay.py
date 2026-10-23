@@ -22,6 +22,13 @@ REPLAYS_UNIFORM = [
 ]
 
 
+def samples(replay, batch=1, mode='train'):
+  # Replay.dataset() was replaced by Replay.sample() in f8817c40, which returns
+  # one batch per call instead of an iterator.
+  while True:
+    yield replay.sample(batch, mode)
+
+
 def unbatched(dataset):
   for batch in dataset:
     yield {k: v[0] for k, v in batch.items()}
@@ -37,7 +44,7 @@ class TestReplay:
     replay = Replay(length=5, capacity=10)
     for step in range(30):
       replay.add({'image': np.zeros((64, 64, 3)), 'action': np.zeros(12)})
-    seq = next(unbatched(replay.dataset(1)))
+    seq = next(unbatched(samples(replay)))
     assert set(seq.keys()) == {'stepid', 'image', 'action'}
     assert seq['stepid'].shape == (5, 20)
     assert seq['image'].shape == (5, 64, 64, 3)
@@ -66,7 +73,7 @@ class TestReplay:
     for step in range(30):
       for worker in range(workers):
         replay.add({'step': step, 'worker': worker}, worker)
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(10):
       seq = next(dataset)
       assert (seq['step'] - seq['step'][0] == np.arange(length)).all()
@@ -79,7 +86,7 @@ class TestReplay:
     replay = Replay(length, capacity)
     for step in range(length):
       replay.add({'step': step})
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(10):
       seq = next(dataset)
       assert (seq['step'] == np.arange(length)).all()
@@ -91,7 +98,7 @@ class TestReplay:
       replay.add({'step': step})
     assert len(replay) == 3
     histogram = collections.defaultdict(int)
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(100):
       seq = next(dataset)
       histogram[seq['step'][0]] += 1
@@ -108,7 +115,7 @@ class TestReplay:
     replay.add({'step': 1}, worker=1)
     replay.add({'step': 2}, worker=0)
     replay.add({'step': 3}, worker=1)
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(10):
       seq = next(dataset)
       assert tuple(seq['step']) in ((0, 2), (1, 3))
@@ -126,7 +133,7 @@ class TestReplay:
       except StopIteration:
         pass
     histogram = collections.defaultdict(int)
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(10):
       seq = next(dataset)
       assert (seq['step'] - seq['step'][0] == np.arange(length)).all()
@@ -166,7 +173,7 @@ class TestReplay:
     replay = Replay(length, capacity, directory=tmpdir)
     replay.load(data)
     assert len(replay) == num_items
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(len(replay)):
       assert len(next(dataset)['step']) == length
 
@@ -187,7 +194,7 @@ class TestReplay:
     for _ in range(30):
       replay.add({'foo': 42})
     replay.load(data)
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     if capacity < num_items:
       for _ in range(len(replay)):
         assert next(dataset)['foo'] == 13
@@ -208,7 +215,7 @@ class TestReplay:
     replay = Replay(length, capacity, directory=tmpdir)
     replay.load(data)
     assert len(replay) == num_items
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(len(replay)):
       assert len(next(dataset)['step']) == length
 
@@ -241,7 +248,7 @@ class TestReplay:
     replay.load(data)
     assert sorted(elements.Path(tmpdir).glob('*.npz')) == sorted(filenames)
     assert len(replay) == num_items
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(len(replay)):
       assert len(next(dataset)['step']) == length
 
@@ -273,7 +280,7 @@ class TestReplay:
     replay = Replay(length, capacity, directory=tmpdir, chunksize=chunksize)
     replay.load(data)
     assert len(replay) == num_items
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(len(replay)):
       assert len(next(dataset)['step']) == length
 
@@ -295,7 +302,7 @@ class TestReplay:
     replay = Replay(length, capacity, directory=tmpdir)
     replay.load(data)
     assert len(replay) == num_items
-    dataset = unbatched(replay.dataset(1))
+    dataset = unbatched(samples(replay))
     for _ in range(len(replay)):
       assert len(next(dataset)['step']) == length
     for step in range(inserts):
@@ -322,7 +329,7 @@ class TestReplay:
         time.sleep(0.001)
 
     def sampler():
-      dataset = unbatched(replay.dataset(1))
+      dataset = unbatched(samples(replay))
       while running[0]:
         seq = next(dataset)
         assert (seq['step'] - seq['step'][0] == np.arange(length)).all()

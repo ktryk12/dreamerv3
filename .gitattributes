@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings. The Dockerfile copies the working tree
+# into the image and runs `sh entrypoint.sh`; with CRLF that is a runtime
+# failure, and core.autocrlf=true on Windows checkouts produces CRLF.
+*.sh text eol=lf

@@ -14,7 +14,8 @@ class TestTrain:
     agent = self._make_agent()
     embodied.run.train(
         lambda: agent, bind(self._make_replay, args),
-        self._make_env, self._make_logger, args)
+        self._make_env, bind(utils.make_stream, args),
+        self._make_logger, args)
     stats = agent.stats()
     print('Stats:', stats)
     replay_steps = args.steps * args.train_ratio
@@ -27,7 +28,8 @@ class TestTrain:
     args = args.update(steps=2 * args.steps)
     embodied.run.train(
         lambda: agent, bind(self._make_replay, args),
-        self._make_env, self._make_logger, args)
+        self._make_env, bind(utils.make_stream, args),
+        self._make_logger, args)
     stats = agent.stats()
     assert stats['loads'] == 1
     assert np.allclose(stats['env_steps'], args.steps, 100, 0.1)
@@ -68,4 +70,5 @@ class TestTrain:
         batch_length=16,
         replay_context=0,
         report_length=8,
+        consec_report=1,
     )

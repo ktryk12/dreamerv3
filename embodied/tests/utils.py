@@ -1,7 +1,7 @@
 import time
 
 import elements
-import zerofun
+import portal
 import numpy as np
 
 
@@ -11,7 +11,7 @@ class TestAgent:
     self.obs_space = obs_space
     self.act_space = act_space
     if addr:
-      self.client = zerofun.Client(addr, connect=True)
+      self.client = portal.Client(addr)
       self.should_stats = elements.when.Clock(1)
     else:
       self.client = None
@@ -64,7 +64,12 @@ class TestAgent:
     return (carry,), act, {}
 
   def train(self, carry, data):
-    expected = sorted(set(self.obs_space | self.act_space) | {'stepid'})
+    # f8817c40: 'reset' is no longer recorded in transitions (it stays in
+    # Driver.acts for the env), and the Consec stream adds 'consec'.
+    expected = set(self.obs_space) | set(self.act_space)
+    expected |= {'stepid', 'consec'}
+    expected.discard('reset')
+    expected = sorted(expected)
     assert sorted(data.keys()) == expected, (sorted(data.keys()), expected)
     B, T = data['count'].shape
     carry, = carry
@@ -92,8 +97,11 @@ class TestAgent:
         'video': np.zeros((10, 64, 64, 3)),
     }
 
-  def dataset(self, generator):
-    return generator()
+  def stream(self, st):
+    # base.Agent.dataset(generator) became stream(st) -> st in f8817c40. The
+    # JAX agent wraps the stream for device placement and seeding; a test agent
+    # needs neither, so it passes the stream through unchanged.
+    return st
 
   def save(self):
     self._stats['saves'] += 1
@@ -102,3 +110,18 @@ class TestAgent:
   def load(self, data):
     self._stats = data
     self._stats['loads'] += 1
+
+
+def make_stream(args, replay, mode):
+  """Mirror of dreamerv3/main.py:make_stream for the test agent."""
+  from functools import partial as bind
+  import embodied
+  fn = bind(replay.sample, args.batch_size, mode)
+  stream = embodied.streams.Stateless(fn)
+  return embodied.streams.Consec(
+      stream,
+      length=args.batch_length if mode == 'train' else args.report_length,
+      consec=1,
+      prefix=args.replay_context,
+      strict=(mode == 'train'),
+      contiguous=True)

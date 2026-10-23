@@ -54,7 +54,13 @@ class TestDriver:
     seq = {k: np.array([seq[i][k] for i in range(len(seq))]) for k in seq[0]}
     assert (seq['is_first'] == [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]).all()
     assert (seq['is_last']  == [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1]).all()
-    assert (seq['reset']    == [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1]).all()
+    # f8817c40 removed 'reset' from the recorded transition: the driver now
+    # keeps it only in self.acts for the next env step, and
+    # embodied/jax/agent.py asserts 'reset' is not part of the act space.
+    # The signal itself is unchanged, so it is asserted via is_last above
+    # and via the driver's own flag below.
+    assert 'reset' not in seq
+    assert (driver.acts['reset'] == seq['is_last'][-1]).all()
     assert (seq['act_disc'] == [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0]).all()
 
   def test_agent_inputs(self):
@@ -107,7 +113,8 @@ class TestDriver:
     driver(agent.policy, episodes=1)
     assert len(steps) == 8
     steps = {k: np.array([x[k] for x in steps]) for k in steps[0]}
-    assert (steps['reset'] == [0, 0, 0, 0, 0, 0, 0, 1]).all()
+    assert 'reset' not in steps
+    assert (driver.acts['reset'] == steps['is_last'][-1]).all()
     assert (steps['is_first'] == [1, 0, 0, 1, 0, 0, 0, 0]).all()
     assert (steps['is_last'] == [0, 0, 0, 0, 0, 0, 0, 1]).all()
 
