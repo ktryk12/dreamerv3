@@ -10,7 +10,10 @@
 #   podman run --rm -v dreamerv3-logs:/logdir dreamerv3-cpu \
 #     python dreamerv3/main.py --logdir /logdir/run --configs crafter debug
 
-FROM docker.io/library/python:3.11-slim
+# Pinned by digest, not tag: the tag moved between 2026-10-14 and
+# 2026-10-23, and a moving base defeats the point of the lock below.
+# Refresh deliberately, together with scripts/lock-deps.sh.
+FROM docker.io/library/python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377
 
 # System libraries. ffmpeg for video logging, libgl1/libglib2.0 for the
 # OpenCV wheel that Crafter pulls in, git for pip installs from source.
@@ -25,25 +28,21 @@ ENV PIP_ROOT_USER_ACTION=ignore
 
 RUN pip install -U pip setuptools
 
-# Upstream requirements.txt stays the source of truth so we keep inheriting
-# dependency bumps from danijar/dreamerv3. Four lines are handled separately:
+# Every runtime dependency comes from the lock, with wheel hashes, so a rebuild
+# installs the same 101 packages rather than whatever is newest.
+# --require-hashes also makes pip refuse any requirement that is not listed,
+# which is what turns "pinned" into "complete".
 #
-#   jax[cuda12], nvidia-cuda-nvcc  no CPU equivalent, dropped
-#   chex, optax                    unpinned upstream, and their current
-#                                  releases require jax >= 0.7; that jax
-#                                  rejects the positional jax.jit arguments in
-#                                  embodied/jax/transform.py
-#
-# So the rest of the requirements install first, then the JAX stack is pinned
-# to the 0.4.33 line that requirements.txt itself asks for.
-COPY requirements.txt requirements.txt
-RUN grep -v -E "^(jax\[cuda|nvidia-cuda-nvcc|chex|optax)" requirements.txt \
-      > requirements.cpu.txt \
-    && pip install -r requirements.cpu.txt \
-    && pip install "jax[cpu]==0.4.33" "chex==0.1.87" "optax==0.2.3"
-
-# Crafter is our lightweight CPU benchmark environment.
-RUN pip install crafter
+# Upstream's requirements.txt is still the input to the lock, so bumps from
+# danijar/dreamerv3 keep reaching us -- as a reviewable diff from
+# scripts/lock-deps.sh instead of silently at build time. The lock owns the
+# four lines the CPU build handles specially: jax[cuda12] and
+# nvidia-cuda-nvcc are dropped, and jax/chex/optax are held at the 0.4.33 line
+# because newer chex/optax require jax >= 0.7, which rejects the positional
+# jax.jit arguments in embodied/jax/transform.py. crafter, our benchmark
+# environment, is pinned there too.
+COPY requirements.lock.txt requirements.lock.txt
+RUN pip install --require-hashes --no-deps -r requirements.lock.txt
 
 WORKDIR /app
 COPY . .
