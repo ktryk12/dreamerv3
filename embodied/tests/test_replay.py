@@ -63,6 +63,44 @@ class TestReplay:
       assert len(replay) == target
 
   @pytest.mark.parametrize('Replay', REPLAYS_UNLIMITED)
+  @pytest.mark.parametrize('capacity', [1, 2, 10])
+  def test_evict_and_sample_at_capacity(self, Replay, capacity):
+    # Regression for the eviction path. Replay._insert evicts before it
+    # inserts, so at eviction time the selector holds exactly `capacity`
+    # items; with capacity=1 that is a single item, which the selector used
+    # to refuse to delete.
+    replay = Replay(length=1, capacity=capacity)
+    dataset = unbatched(samples(replay))
+    for step in range(4 * capacity):
+      replay.add({'step': step})
+      assert len(replay) == min(step + 1, capacity)
+      # Only the most recent `capacity` steps may be sampled.
+      live = set(range(max(0, step - capacity + 1), step + 1))
+      for _ in range(4):
+        assert next(dataset)['step'].item() in live
+
+  @pytest.mark.parametrize('Replay', REPLAYS_UNLIMITED)
+  def test_capacity_one_holds_only_the_last_step(self, Replay):
+    replay = Replay(length=1, capacity=1)
+    dataset = unbatched(samples(replay))
+    for step in range(20):
+      replay.add({'step': step})
+      assert len(replay) == 1
+      assert next(dataset)['step'].item() == step
+
+  @pytest.mark.parametrize('Replay', REPLAYS_UNLIMITED)
+  def test_eviction_is_fifo(self, Replay):
+    # With capacity=2 the oldest of the two items is the one evicted.
+    replay = Replay(length=1, capacity=2)
+    dataset = unbatched(samples(replay))
+    replay.add({'step': 0})
+    replay.add({'step': 1})
+    assert {next(dataset)['step'].item() for _ in range(50)} == {0, 1}
+    replay.add({'step': 2})
+    assert len(replay) == 2
+    assert {next(dataset)['step'].item() for _ in range(50)} == {1, 2}
+
+  @pytest.mark.parametrize('Replay', REPLAYS_UNLIMITED)
   @pytest.mark.parametrize(
       'length,workers,capacity,chunksize',
       [(1, 1, 1, 128), (2, 1, 2, 128), (5, 1, 10, 128), (1, 2, 2, 128),

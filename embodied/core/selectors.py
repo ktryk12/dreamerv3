@@ -49,7 +49,14 @@ class Uniform:
 
   def __delitem__(self, key):
     with self.lock:
-      assert 2 <= len(self), len(self)
+      # Replay._insert evicts before it inserts, so at eviction time the
+      # selector holds exactly `capacity` items. With capacity=1 that is one
+      # item, and requiring two made a capacity=1 buffer unusable. The
+      # swap-with-last removal below is correct for a single element: the
+      # index equals the new length, so the swap is skipped and both
+      # containers end up empty. The guard only has to exclude deleting from
+      # an empty selector, where indices.pop would raise KeyError.
+      assert 1 <= len(self), len(self)
       index = self.indices.pop(key)
       last = self.keys.pop()
       if index != len(self.keys):
